@@ -5,8 +5,8 @@ using HarmonyLib;
 using System.Reflection.Emit;
 using PulsarModLoader.Patches;
 using UnityEngine;
-using static PulsarModLoader.Patches.HarmonyHelpers;
-using System.Linq;
+using System.Collections;
+using CodeStage.AntiCheat.ObscuredTypes;
 
 namespace Hard_Mode
 {
@@ -141,38 +141,212 @@ namespace Hard_Mode
         [HarmonyPatch(typeof(PLPersistantEncounterInstance), "SpawnRelevantRelicHunter")]
         class UpdateRelic //This Updates the combat levels for relic hunter
         {
-            static void Prefix() 
+            static void Prefix()
             {
                 if (!updated) UpdateHunterLevel();
             }
         }
         [HarmonyPatch(typeof(PLServer), "SpawnHunter")]
-        public class BountyHunterBalance //Allow to change the Min and Max values for the difference between you and the bounty hunter
+        public class BountyHunterOverhaul // Completely rework the Bounty Hunter spawning mechanics
         {
             static public float MinCombatLevel = 1.2f;
             static public float MaxCombatLevel = 1.5f;
-            static void Prefix()
+            private static FieldInfo m_ActiveBountyHunter_TypeID = AccessTools.Field(typeof(PLServer), "m_ActiveBountyHunter_TypeID");
+            private static FieldInfo m_ActiveBountyHunter_LastCreateHunterUpdateTime = AccessTools.Field(typeof(PLServer), "m_ActiveBountyHunter_LastCreateHunterUpdateTime");
+            private static FieldInfo m_ActiveBountyHunter_SectorID = AccessTools.Field(typeof(PLServer), "m_ActiveBountyHunter_SectorID");
+            private static FieldInfo m_ActiveBountyHunter_SecondsSinceWarp = AccessTools.Field(typeof(PLServer), "m_ActiveBountyHunter_SecondsSinceWarp");
+            private static ObscuredInt NegativeOne = -1;
+            private static MethodInfo ControlledSEND_SetupNewHunter = AccessTools.Method(typeof(PLServer), "ControlledSEND_SetupNewHunter");
+            static bool Prefix(PLServer __instance)
             {
                 if (!updated) UpdateHunterLevel();
+                __instance.BountyHuntersSpawned++;
+                PLSectorInfo currentSector = PLServer.GetCurrentSector();
+                int num = 0;
+                foreach (PLPersistantShipInfo plpersistantShipInfo in __instance.AllPSIs)
+                {
+                    if (plpersistantShipInfo != null && plpersistantShipInfo.MyCurrentSector == currentSector && !plpersistantShipInfo.IsShipDestroyed && plpersistantShipInfo.ShipInstance != null && !plpersistantShipInfo.ShipInstance.IsShipInfoBase)
+                    {
+                        num++;
+                    }
+                }
+                float lowerBound = MinCombatLevel;
+                float higherBound = MaxCombatLevel;
+                bool flag;
+                if (__instance.BountyHunterInfo == null || __instance.BountyHunterInfo.IsShipDestroyed)
+                {
+                    flag = ((UnityEngine.Random.value < 0.5f || __instance.ChaosLevel > 5f) && PLEncounterManager.Instance.GetNumberOf_PossibleHunterLayout(lowerBound, higherBound) > 0);
+                }
+                else
+                {
+                    flag = (__instance.BountyHunterInfo.ShipInstance == null);
+                }
+                if (flag && num == 0)
+                {
+                    PLShipInfoBase shipInstance;
+                    if (__instance.BountyHunterInfo == null || __instance.BountyHunterInfo.IsShipDestroyed)
+                    {
+                        PLEncounterManager.ShipLayout randomPossibleHunterLayout = PLEncounterManager.Instance.GetRandomPossibleHunterLayout(lowerBound, higherBound);
+                        __instance.BountyHunterLayout = randomPossibleHunterLayout;
+                        __instance.BountyHunterInfo = new PLPersistantShipInfo(__instance.BountyHunterLayout.ShipType, 6, currentSector, 0, false, true, false, -1, -1);
+                        __instance.BountyHunterInfo.CreateShipInstance(PLEncounterManager.Instance.GetCPEI());
+                        shipInstance = __instance.BountyHunterInfo.ShipInstance;
+                    }
+                    else
+                    {
+                        __instance.BountyHunterInfo.MyCurrentSector = currentSector;
+                        __instance.BountyHunterInfo.CreateShipInstance(PLEncounterManager.Instance.GetCPEI());
+                        shipInstance = __instance.BountyHunterInfo.ShipInstance;
+                    }
+                    if (shipInstance != null)
+                    {
+                        if (__instance.BountyHunterLayout != null)
+                        {
+                            shipInstance.IsBountyHunter = true;
+                            shipInstance.CreditsLeftBehind += 2500;
+                            shipInstance.MyStats.FormatToDataString(__instance.BountyHunterLayout.Data);
+                            shipInstance.MyStats.FormatToCrewString(__instance.BountyHunterLayout.Crew);
+                        }
+                        shipInstance.OnShipKilled += delegate ()
+                        {
+                            m_ActiveBountyHunter_TypeID.SetValue(__instance, NegativeOne);
+                            m_ActiveBountyHunter_LastCreateHunterUpdateTime.SetValue(__instance, (ObscuredFloat)Time.time);
+                            __instance.BountyHunterInfo = null;
+                        };
+                        shipInstance.OnEnemyShipWarp += delegate (int sectorID)
+                        {
+                            m_ActiveBountyHunter_SectorID.SetValue(__instance, (ObscuredInt)sectorID);
+                            m_ActiveBountyHunter_SecondsSinceWarp.SetValue(__instance, (ObscuredFloat)0f);
+                            if (__instance.BountyHunterInfo != null)
+                            {
+                                __instance.BountyHunterInfo.HullPercent = Mathf.Clamp01(__instance.BountyHunterInfo.HullPercent + 0.33f);
+                                __instance.BountyHunterInfo.ShldPercent = 1f;
+                                __instance.BountyHunterInfo.MyCurrentSector = PLServer.GetSectorWithID(sectorID);
+                            }
+                        };
+                        if (__instance.BountyHunterInfo != null)
+                        {
+                            __instance.BountyHunterInfo.ForcedHostileToShipID = PLEncounterManager.Instance.PlayerShip.ShipID;
+                            __instance.BountyHunterInfo.IsFlagged = true;
+                            shipInstance.IsFlagged = true;
+                            return false;
+                        }
+                    }
+                }
+                else if (__instance.BountyHunterInfo == null || __instance.BountyHunterInfo.ShipInstance == null)
+                {
+                    __instance.BountyHunterInfo = null;
+                    PLShipInfoBase plshipInfoBase = PLEncounterManager.Instance.GetCPEI().SpawnEnemyShip(EShipType.E_BOUNTY_HUNTER_01, null, default(Vector3), default(Quaternion));
+                    if (plshipInfoBase != null)
+                    {
+                        plshipInfoBase.IsFlagged = true;
+                    }
+                    SpawnHunterPawn(__instance);
+                    m_ActiveBountyHunter_TypeID.SetValue(__instance, NegativeOne);
+                }
+                return false;
             }
-            private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+            private static void SpawnHunterPawn(PLServer __instance)
             {
-                List<CodeInstruction> targetSequence = new List<CodeInstruction>
+                if (__instance.MyHunterSpawner == null)
                 {
-                new CodeInstruction(OpCodes.Ldsfld, AccessTools.Field(typeof(PLEncounterManager),"Instance")),
-                new CodeInstruction(OpCodes.Ldloc_3),
-                new CodeInstruction(OpCodes.Ldloc_S),
-                new CodeInstruction(OpCodes.Callvirt, AccessTools.Method(typeof(PLEncounterManager),"GetRandomPossibleHunterLayout")),
-                };
-                List<CodeInstruction> patchSequence = new List<CodeInstruction>
+                    __instance.MyHunterSpawner = __instance.gameObject.AddMissingComponent<PLSpawner>();
+                    __instance.MyHunterSpawner.Spawn = "Bandit";
+                    __instance.MyHunterSpawner.ShouldRespawnEnemy = false;
+                    __instance.MyHunterSpawner_FactionParameter = new SpawnParameter
+                    {
+                        Name = "Faction"
+                    };
+                    __instance.MyHunterSpawner_RaceParameter = new SpawnParameter
+                    {
+                        Name = "Race"
+                    };
+                    __instance.MyHunterSpawner_GenderParameter = new SpawnParameter
+                    {
+                        Name = "Gender"
+                    };
+                    __instance.MyHunterSpawner.Parameters.Add(__instance.MyHunterSpawner_FactionParameter);
+                    __instance.MyHunterSpawner.Parameters.Add(__instance.MyHunterSpawner_RaceParameter);
+                    __instance.MyHunterSpawner.Parameters.Add(__instance.MyHunterSpawner_GenderParameter);
+                    __instance.MyHunterSpawner.enabled = false;
+                }
+                if ((ObscuredInt)m_ActiveBountyHunter_TypeID.GetValue(__instance) == 0)
                 {
-                new CodeInstruction(OpCodes.Ldsfld, AccessTools.Field(typeof(PLEncounterManager),"Instance")),
-                new CodeInstruction(OpCodes.Ldsfld, AccessTools.Field(typeof(BountyHunterBalance), "MinCombatLevel")),
-                new CodeInstruction(OpCodes.Ldsfld, AccessTools.Field(typeof(BountyHunterBalance), "MaxCombatLevel")),
-                new CodeInstruction(OpCodes.Callvirt, AccessTools.Method(typeof(PLEncounterManager),"GetRandomPossibleHunterLayout")),
-                };
-                patchSequence[0].labels = instructions.ToList()[FindSequence(instructions, targetSequence, CheckMode.NONNULL) - 4].labels;
-                return PatchBySequence(instructions, targetSequence, patchSequence, PatchMode.REPLACE, CheckMode.NONNULL, false);
+                    __instance.MyHunterSpawner_FactionParameter.Value = "0";
+                    __instance.MyHunterSpawner_RaceParameter.Value = UnityEngine.Random.Range(0, 3).ToString();
+                }
+                else if ((ObscuredInt)m_ActiveBountyHunter_TypeID.GetValue(__instance) == 2)
+                {
+                    __instance.MyHunterSpawner_FactionParameter.Value = "2";
+                    __instance.MyHunterSpawner_RaceParameter.Value = UnityEngine.Random.Range(0, 3).ToString();
+                }
+                else
+                {
+                    __instance.MyHunterSpawner_FactionParameter.Value = "1";
+                    __instance.MyHunterSpawner_RaceParameter.Value = UnityEngine.Random.Range(0, 3).ToString();
+                }
+                if (__instance.MyHunterSpawner_RaceParameter.Value != "0")
+                {
+                    __instance.MyHunterSpawner_GenderParameter.Value = "male";
+                }
+                else
+                {
+                    __instance.MyHunterSpawner_GenderParameter.Value = ((UnityEngine.Random.value < 0.5f) ? "male" : "female");
+                }
+                PLSpawner.DoSpawnStatic(PLEncounterManager.Instance.GetCPEI(), "Bandit", PLEncounterManager.Instance.PlayerShip.MyTLI.AllTTIs[0].transform, __instance.MyHunterSpawner, PLEncounterManager.Instance.PlayerShip.MyTLI, null, null);
+                PLPlayer component = PLEncounterManager.Instance.GetCPEI().MyCreatedPlayers[PLEncounterManager.Instance.GetCPEI().MyCreatedPlayers.Count - 1].GetComponent<PLPlayer>();
+                component.GetPawn().BlockWarpWhenOnboard = true;
+                if (__instance.MyHunterSpawner_RaceParameter.Value == "0")
+                {
+                    component.GetPawn().SetExosuitIsActive(true);
+                }
+                string text = PLServer.Instance.NPCNames[UnityEngine.Random.Range(0, PLServer.Instance.NPCNames.Count)];
+                if (text.Contains(" "))
+                {
+                    text = text.Split(new char[]
+                    {
+                ' '
+                    })[0];
+                }
+                component.SetPlayerName(text + " The Hunter");
+                component.Talents[56] = Mathf.RoundToInt(5f + __instance.ChaosLevel * 2f);
+                component.Talents[0] = Mathf.RoundToInt(20f + __instance.ChaosLevel * 4f);
+                int pawnInvItemIDCounter;
+                if ((ObscuredInt)m_ActiveBountyHunter_TypeID.GetValue(__instance) == 0)
+                {
+                    PLPawnInventoryBase myInventory = component.MyInventory;
+                    PLServer instance = PLServer.Instance;
+                    pawnInvItemIDCounter = instance.PawnInvItemIDCounter;
+                    instance.PawnInvItemIDCounter = pawnInvItemIDCounter + 1;
+                    myInventory.UpdateItem(pawnInvItemIDCounter, 7, 0, 4, 6);
+                }
+                else if ((ObscuredInt)m_ActiveBountyHunter_TypeID.GetValue(__instance) == 2)
+                {
+                    PLPawnInventoryBase myInventory2 = component.MyInventory;
+                    PLServer instance2 = PLServer.Instance;
+                    pawnInvItemIDCounter = instance2.PawnInvItemIDCounter;
+                    instance2.PawnInvItemIDCounter = pawnInvItemIDCounter + 1;
+                    myInventory2.UpdateItem(pawnInvItemIDCounter, 30, 0, 0, 6);
+                }
+                else
+                {
+                    PLPawnInventoryBase myInventory3 = component.MyInventory;
+                    PLServer instance3 = PLServer.Instance;
+                    pawnInvItemIDCounter = instance3.PawnInvItemIDCounter;
+                    instance3.PawnInvItemIDCounter = pawnInvItemIDCounter + 1;
+                    myInventory3.UpdateItem(pawnInvItemIDCounter, 8, 0, 4, 6);
+                }
+                PLPawnInventoryBase myInventory4 = component.MyInventory;
+                PLServer instance4 = PLServer.Instance;
+                pawnInvItemIDCounter = instance4.PawnInvItemIDCounter;
+                instance4.PawnInvItemIDCounter = pawnInvItemIDCounter + 1;
+                myInventory4.UpdateItem(pawnInvItemIDCounter, 31, 0, 0, -1);
+                PLPawnInventoryBase myInventory5 = component.MyInventory;
+                PLServer instance5 = PLServer.Instance;
+                pawnInvItemIDCounter = instance5.PawnInvItemIDCounter;
+                instance5.PawnInvItemIDCounter = pawnInvItemIDCounter + 1;
+                myInventory5.UpdateItem(pawnInvItemIDCounter, 31, 0, 0, -1);
+                __instance.StartCoroutine((IEnumerator)ControlledSEND_SetupNewHunter.Invoke(__instance, new object[] { component.GetPawn() }));
             }
         }
         [HarmonyPatch(typeof(PLPersistantEncounterInstance), "SpawnEnemyShip")]
@@ -219,7 +393,7 @@ namespace Hard_Mode
                             ship.ShipNameValue = biscuitnames[Random.Range(0, biscuitnames.Length - 1)];
                             break;
                     }
-                    if(ship.GetCombatLevel() > 135 && Random.value < 0.1 && ship.PersistantShipInfo.ShipName != "") 
+                    if (ship.GetCombatLevel() > 135 && Random.value < 0.1 && ship.PersistantShipInfo.ShipName != "")
                     {
                         ship.ShipNameValue = "The Glass Revenant Mk " + Random.Range(1, 999);
                     }
