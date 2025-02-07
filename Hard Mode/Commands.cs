@@ -6,6 +6,17 @@ using System.Reflection;
 
 namespace Hard_Mode
 {
+#if DEBUG
+    class SpawnHunter : ChatCommand
+    {
+        public override string[] CommandAliases() => new string[] { "spawnhunter" };
+        public override string Description() => "Debug";
+        public override void Execute(string arguments)
+        {
+            PLServer.Instance.SpawnHunter();
+        }
+    }
+#endif
     class Commands : ChatCommand
     {
         public override string[] CommandAliases()
