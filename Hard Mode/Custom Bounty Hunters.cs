@@ -16,23 +16,34 @@ namespace Hard_Mode
 {
     class Custom_Bounty_Hunters
     {
+        /// <summary>
+        /// Used for custom Pawn Hunters
+        /// </summary>
         internal class Custom_Pawn
         {
             private static FieldInfo m_ActiveBountyHunter_TypeIDInfo = AccessTools.Field(typeof(PLServer), "m_ActiveBountyHunter_TypeID");
-            private static KeyValuePair<string, CustomPawnData> __appearance = new KeyValuePair<string, CustomPawnData>();
+            private static bool __initial;
             private static string __name;
             private static int __classid;
-            private static PLPlayer player;
+            private static CustomPawnData __appearance;
+            private static PLPlayer __player;
+            private static PLShipInfoBase __hunterShip;
             [HarmonyPatch(typeof(PLSpawner), "DoSpawn")]
             public class HunterRespawnPatch
-            { // Create Hunter respawning
+            { // Do Hunter respawn
                 static bool Prefix(PLSpawner __instance)
                 {
                     if (__instance.Spawn != "Hunter") return true;
                     PLServer server = PLServer.Instance;
+                    if (!__initial && (__hunterShip == null || __hunterShip.HasBeenDestroyed))
+                    {
+                        __instance.ShouldRespawnEnemy = false;
+                        __instance.enabled = false;
+                        return false;
+                    }
                     PLSpawner.DoSpawnStatic(PLEncounterManager.Instance.GetCPEI(), "Bandit", PLEncounterManager.Instance.PlayerShip.MyTLI.AllTTIs[0].transform, __instance, PLEncounterManager.Instance.PlayerShip.MyTLI, null, null);
                     PLPlayer component = PLEncounterManager.Instance.GetCPEI().MyCreatedPlayers[PLEncounterManager.Instance.GetCPEI().MyCreatedPlayers.Count - 1].GetComponent<PLPlayer>();
-                    player = component;
+                    __player = component;
                     component.SetClassID(__classid);
                     component.GetPawn().BlockWarpWhenOnboard = true;
                     if (server.MyHunterSpawner_RaceParameter.Value == "0")
@@ -85,7 +96,7 @@ namespace Hard_Mode
 
             [HarmonyPatch(typeof(PLServer), "SpawnHunterPawn")]
             public class SpawnPatch
-            { // Allow respawning
+            { // Initialize respawning
                 static bool Prefix(PLServer __instance)
                 {
                     if (__instance.MyHunterSpawner == null)
@@ -143,6 +154,7 @@ namespace Hard_Mode
                         text = text.Split(new char[] { ' ' })[0];
                     }
                     __name = text + " The Hunter";
+                    __initial = true;
                     __instance.MyHunterSpawner.DoSpawn(PLEncounterManager.Instance.GetCPEI());
                     // Original spawn code moved to respawn method (Above) to reduce repetitions
                     return false;
@@ -153,16 +165,24 @@ namespace Hard_Mode
             { // Consistent Appearance
                 static void Postfix(PLPlayer __instance, PLCustomPawn inPawn, CustomPawnData inData, bool enforceUnlocks = true)
                 {
-                    if (player != __instance) return;
-                    if (__appearance.Key == null || __appearance.Key != __name)
+                    if (__player != __instance) return;
+                    if (__initial)
                     {
-                        __appearance = new KeyValuePair<string, CustomPawnData>(__name, inData);
+                        __appearance = inData;
+                        __initial = false;
                     }
                     else
                     {
-                        CustomPawnData appearance = __appearance.Value;
-                        appearance.CopyTo(__instance.MyCustomPawnData[__instance.GetPawnCosmeticType()]);
+                        __appearance.CopyTo(__instance.MyCustomPawnData[__instance.GetPawnCosmeticType()]);
                     }
+                }
+            }
+            [HarmonyPatch(typeof(PLPersistantEncounterInstance), "SpawnEnemyShip")]
+            public class PatchHunterPawnShip
+            { // Used for respawning mechanic, to stop respawning when hunter ship is dead
+                static void Postfix(EShipType inEnemyShipType, ref PLShipInfoBase __result)
+                {
+                    if (inEnemyShipType == EShipType.E_BOUNTY_HUNTER_01) __hunterShip = __result;
                 }
             }
         }
