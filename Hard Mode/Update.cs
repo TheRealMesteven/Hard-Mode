@@ -33,8 +33,8 @@ namespace Hard_Mode
             if (PhotonNetwork.isMasterClient && __instance.GetIsPlayerShip())//This uses the player ship to make updates, better than the PLServer that likes to exception while leaving and entering a game
             {
                 //This will make the relic and bounty hunters harder depending on the chaos
-                Custom_Bounty_Hunters.BountyHunterBalance.MaxCombatLevel = 1.5f + PLServer.Instance.ChaosLevel / 10;
-                Custom_Bounty_Hunters.BountyHunterBalance.MinCombatLevel = 1.2f + PLServer.Instance.ChaosLevel / 15;
+                Custom_Bounty_Hunters.BountyHunterOverhaul.MaxCombatLevel = 1.5f + PLServer.Instance.ChaosLevel / 10;
+                Custom_Bounty_Hunters.BountyHunterOverhaul.MinCombatLevel = 1.2f + PLServer.Instance.ChaosLevel / 15;
                 Custom_Bounty_Hunters.RelicHunterBalance.MaxCombatLevel = 1.5f + PLServer.Instance.ChaosLevel / 5;
                 Custom_Bounty_Hunters.RelicHunterBalance.MinCombatLevel = 1.2f + PLServer.Instance.ChaosLevel / 10;
                 ModMessage.SendRPC("modders.hardmode", "Hard_Mode.ReciveOptions", PhotonTargets.Others, new object[] //This is responsible to send the options to all clients
