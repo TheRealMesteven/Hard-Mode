@@ -10,6 +10,7 @@ using System.Linq;
 using PulsarModLoader.Utilities;
 using System;
 using CodeStage.AntiCheat.ObscuredTypes;
+using ExitGames.Demos.DemoAnimator;
 
 namespace Hard_Mode
 {
@@ -17,7 +18,11 @@ namespace Hard_Mode
     {
         internal class Custom_Pawn
         {
-            protected static FieldInfo m_ActiveBountyHunter_TypeIDInfo = AccessTools.Field(typeof(PLServer), "m_ActiveBountyHunter_TypeID");
+            private static FieldInfo m_ActiveBountyHunter_TypeIDInfo = AccessTools.Field(typeof(PLServer), "m_ActiveBountyHunter_TypeID");
+            private static KeyValuePair<string, CustomPawnData> __appearance = new KeyValuePair<string, CustomPawnData>();
+            private static string __name;
+            private static int __classid;
+            private static PLPlayer player;
             [HarmonyPatch(typeof(PLSpawner), "DoSpawn")]
             public class HunterRespawnPatch
             { // Create Hunter respawning
@@ -27,17 +32,14 @@ namespace Hard_Mode
                     PLServer server = PLServer.Instance;
                     PLSpawner.DoSpawnStatic(PLEncounterManager.Instance.GetCPEI(), "Bandit", PLEncounterManager.Instance.PlayerShip.MyTLI.AllTTIs[0].transform, __instance, PLEncounterManager.Instance.PlayerShip.MyTLI, null, null);
                     PLPlayer component = PLEncounterManager.Instance.GetCPEI().MyCreatedPlayers[PLEncounterManager.Instance.GetCPEI().MyCreatedPlayers.Count - 1].GetComponent<PLPlayer>();
+                    player = component;
+                    component.SetClassID(__classid);
                     component.GetPawn().BlockWarpWhenOnboard = true;
                     if (server.MyHunterSpawner_RaceParameter.Value == "0")
                     {
                         component.GetPawn().SetExosuitIsActive(true);
                     }
-                    string text = PLServer.Instance.NPCNames[UnityEngine.Random.Range(0, PLServer.Instance.NPCNames.Count)];
-                    if (text.Contains(" "))
-                    {
-                        text = text.Split(new char[] { ' ' })[0];
-                    }
-                    component.SetPlayerName(text + " The Hunter");
+                    component.SetPlayerName(__name);
                     component.Talents[56] = Mathf.RoundToInt(5f + server.ChaosLevel * 2f);
                     component.Talents[0] = Mathf.RoundToInt(20f + server.ChaosLevel * 4f);
                     int num;
@@ -92,7 +94,7 @@ namespace Hard_Mode
                         __instance.MyHunterSpawner.Spawn = "Hunter";
                         __instance.MyHunterSpawner.ShouldRespawnEnemy = true;
                         __instance.MyHunterSpawner.SpawnedEnemyRespawn_NoPlayersWithinMeters = 0f;
-                        __instance.MyHunterSpawner.SpawnedEnemyRespawnTime_Seconds = 10f;
+                        __instance.MyHunterSpawner.SpawnedEnemyRespawnTime_Seconds = Mathf.RoundToInt(30f - (__instance.ChaosLevel * 15f / 9f));
                         __instance.MyHunterSpawner_FactionParameter = new SpawnParameter
                         {
                             Name = "Faction"
@@ -134,9 +136,33 @@ namespace Hard_Mode
                     {
                         __instance.MyHunterSpawner_GenderParameter.Value = ((UnityEngine.Random.value < 0.5f) ? "male" : "female");
                     }
+                    __classid = UnityEngine.Random.Range(0, 5);
+                    string text = PLServer.Instance.NPCNames[UnityEngine.Random.Range(0, PLServer.Instance.NPCNames.Count)];
+                    if (text.Contains(" "))
+                    {
+                        text = text.Split(new char[] { ' ' })[0];
+                    }
+                    __name = text + " The Hunter";
                     __instance.MyHunterSpawner.DoSpawn(PLEncounterManager.Instance.GetCPEI());
                     // Original spawn code moved to respawn method (Above) to reduce repetitions
                     return false;
+                }
+            }
+            [HarmonyPatch(typeof(PLPlayer), "RandomizeCustomPawnData")]
+            public class AppearancePatch
+            { // Consistent Appearance
+                static void Postfix(PLPlayer __instance, PLCustomPawn inPawn, CustomPawnData inData, bool enforceUnlocks = true)
+                {
+                    if (player != __instance) return;
+                    if (__appearance.Key == null || __appearance.Key != __name)
+                    {
+                        __appearance = new KeyValuePair<string, CustomPawnData>(__name, inData);
+                    }
+                    else
+                    {
+                        CustomPawnData appearance = __appearance.Value;
+                        appearance.CopyTo(__instance.MyCustomPawnData[__instance.GetPawnCosmeticType()]);
+                    }
                 }
             }
         }
